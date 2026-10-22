@@ -1,0 +1,42 @@
+name: Build WDA IPA for iOS 12
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-11
+
+    steps:
+      - name: Checkout WDA v3.30.0
+        uses: actions/checkout@v3
+        with:
+          repository: 'appium/WebDriverAgent'
+          ref: 'v3.30.0'
+
+      - name: Select Xcode Version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_12.4.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Build WebDriverAgentRunner for iPhoneOS
+        run: |
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package to IPA
+        run: |
+          cd build/Build/Products/Debug-iphoneos
+          mkdir Payload
+          cp -r WebDriverAgentRunner-Runner.app Payload/
+          zip -r WebDriverAgentRunner.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: WDA-v3.30.0-iOS12-iPhoneOS
+          path: build/Build/Products/Debug-iphoneos/WebDriverAgentRunner.ipa
