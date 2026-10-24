@@ -1,4 +1,4 @@
-name: Build WDA v3.9.0 for iOS 12.5.6
+name: Build WDA v3.9.0 with Xcode 14 (Native for iOS 12)
 
 on:
   push:
@@ -10,35 +10,33 @@ permissions:
 
 jobs:
   build-ipa:
-    runs-on: macos-15
+    # Sử dụng macos-13 để chạy Xcode 14 tương thích tuyệt đối với iOS 12.5.6
+    runs-on: macos-13
 
     steps:
-      - name: 1. Tải mã nguồn WDA v3.9.0 gốc từ Appium
+      - name: 1. Tải mã nguồn WDA v3.9.0
         uses: actions/checkout@v4
         with:
           repository: appium/WebDriverAgent
           ref: v3.9.0
 
-      - name: 2. Khởi tạo thư viện phụ thuộc (Carthage)
+      - name: 2. Thiết lập sử dụng Xcode 14.3.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_14.3.1.app/Contents/Developer
+          xcodebuild -version
+
+      - name: 3. Khởi tạo thư viện phụ thuộc (Carthage)
         run: |
           if [ -f "./Scripts/bootstrap.sh" ]; then
             chmod +x ./Scripts/bootstrap.sh
             ./Scripts/bootstrap.sh -d || true
           fi
 
-      - name: 3. Cấu hình Xcode project tương thích iOS 12.0
+      - name: 4. Cấu hình Deployment Target xuống iOS 12.0
         run: |
           sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*;/IPHONEOS_DEPLOYMENT_TARGET = 12.0;/g' WebDriverAgent.xcodeproj/project.pbxproj
-          
-          python3 -c '
-          with open("WebDriverAgent.xcodeproj/project.pbxproj", "r") as f:
-              content = f.read()
-          lines = [line for line in content.splitlines() if "XCTAutomationSupport.framework in Frameworks" not in line]
-          with open("WebDriverAgent.xcodeproj/project.pbxproj", "w") as f:
-              f.write("\n".join(lines))
-          '
 
-      - name: 4. Biên dịch WebDriverAgentRunner (arm64)
+      - name: 5. Biên dịch WDA Runner chuẩn Native Xcode 14 (arm64)
         run: |
           xcodebuild build-for-testing \
             -project WebDriverAgent.xcodeproj \
@@ -47,7 +45,6 @@ jobs:
             -configuration Release \
             -derivedDataPath ./build_output \
             ARCHS="arm64" \
-            VALID_ARCHS="arm64" \
             ONLY_ACTIVE_ARCH=NO \
             IPHONEOS_DEPLOYMENT_TARGET="12.0" \
             PRODUCT_BUNDLE_IDENTIFIER="com.facebook.WebDriverAgentRunner" \
@@ -55,35 +52,23 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
-            WARNING_CFLAGS="-Wno-everything" \
-            OTHER_LDFLAGS="-ObjC -Wl,-undefined,dynamic_lookup"
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO
 
-      - name: 5. Dọn dẹp và tối ưu hóa cho iPhone 6 (iOS 12.5.6)
+      - name: 6. Đóng gói file .IPA sạch cho iOS 12
         run: |
           APP_PATH="./build_output/Build/Products/Release-iphoneos/WebDriverAgentRunner-Runner.app"
           
-          # Xóa sạch thư mục Frameworks thừa của Xcode 16
-          rm -rf "$APP_PATH/Frameworks"
-          rm -rf "$APP_PATH/PlugIns/WebDriverAgentRunner.xctest.dSYM"
+          # Dọn dẹp chữ ký cũ để chuẩn bị cài qua Sideloadly / tidevice
+          find "$APP_PATH" -name "_CodeSignature" -type d -exec rm -rf {} + || true
           rm -f "$APP_PATH/embedded.mobileprovision"
 
-          # Ép thông số chuẩn iOS 12 trong Info.plist và Mach-O Header
-          find "$APP_PATH" -name "Info.plist" -exec plutil -replace MinimumOSVersion -string "12.0" {} + || true
-          xcrun vtool -set-build-version ios 12.0 12.0 -replace -output "$APP_PATH/WebDriverAgentRunner-Runner" "$APP_PATH/WebDriverAgentRunner-Runner" || true
-          xcrun vtool -set-build-version ios 12.0 12.0 -replace -output "$APP_PATH/PlugIns/WebDriverAgentRunner.xctest/WebDriverAgentRunner" "$APP_PATH/PlugIns/WebDriverAgentRunner.xctest/WebDriverAgentRunner" || true
-
-          # Xóa chữ ký cũ để chuẩn bị cài qua Sideloadly / tidevice
-          find "$APP_PATH" -name "_CodeSignature" -type d -exec rm -rf {} + || true
-
-          # Đóng gói file .IPA
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
-          zip -r -9 WDA_v3.9.0_iOS12_Stable.ipa Payload
+          zip -r -9 WDA_v3.9.0_iOS12_Xcode14.ipa Payload
 
-      - name: 6. Xuất file ra mục Releases
+      - name: 7. Xuất file ra mục Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.9.0-ios12-stable
-          name: "WDA v3.9.0 Ổn định tuyệt đối cho iOS 12.5.6"
-          files: WDA_v3.9.0_iOS12_Stable.ipa
+          tag_name: v3.9.0-ios12-xcode14
+          name: "WDA v3.9.0 (Build bằng Xcode 14 chuẩn cho iOS 12)"
+          files: WDA_v3.9.0_iOS12_Xcode14.ipa
