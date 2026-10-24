@@ -19,33 +19,41 @@ jobs:
           repository: appium/WebDriverAgent
           ref: v3.16.0
 
-      - name: 2. Khởi tạo thư viện phụ thuộc
+      - name: 2. Khởi tạo thư viện phụ thuộc (Carthage)
         run: |
           if [ -f "./Scripts/bootstrap.sh" ]; then
             chmod +x ./Scripts/bootstrap.sh
             ./Scripts/bootstrap.sh -d || true
           fi
 
-      - name: 3. Vá lỗi XCTAutomationSupport và hạ chuẩn iOS 12.0
+      - name: 3. Chuyển XCTAutomationSupport sang Weak Link và hạ iOS 12.0
         run: |
           PBXPROJ="WebDriverAgent.xcodeproj/project.pbxproj"
           
-          # Hạ Deployment Target xuống iOS 12.0
+          # Hạ Deployment Target xuống 12.0
           sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*;/IPHONEOS_DEPLOYMENT_TARGET = 12.0;/g' "$PBXPROJ"
           
-          # Gỡ bỏ liên kết trực tiếp XCTAutomationSupport gây lỗi linker trên Xcode mới
-          sed -i '' '/XCTAutomationSupport.framework/d' "$PBXPROJ"
-          sed -i '' 's/-framework XCTAutomationSupport//g' "$PBXPROJ"
+          # Xóa dòng liên kết cứng XCTAutomationSupport trong phần Frameworks build phase
+          # nhưng giữ nguyên đường dẫn tìm kiếm (Framework Search Paths)
+          python3 -c '
+          with open("WebDriverAgent.xcodeproj/project.pbxproj", "r") as f:
+              content = f.read()
+          lines = [line for line in content.splitlines() if "XCTAutomationSupport.framework in Frameworks" not in line]
+          with open("WebDriverAgent.xcodeproj/project.pbxproj", "w") as f:
+              f.write("\n".join(lines))
+          '
 
       - name: 4. Biên dịch WebDriverAgentRunner (arm64)
         run: |
+          set -o pipefail
           xcodebuild build-for-testing \
             -project WebDriverAgent.xcodeproj \
             -scheme WebDriverAgentRunner \
-            -destination 'generic/platform=iOS' \
+            -sdk iphoneos \
             -configuration Release \
             -derivedDataPath ./build_output \
             ARCHS="arm64" \
+            VALID_ARCHS="arm64" \
             ONLY_ACTIVE_ARCH=NO \
             IPHONEOS_DEPLOYMENT_TARGET="12.0" \
             PRODUCT_BUNDLE_IDENTIFIER="com.facebook.WebDriverAgentRunner" \
@@ -55,7 +63,7 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             GCC_TREAT_WARNINGS_AS_ERRORS=NO \
             WARNING_CFLAGS="-Wno-everything" \
-            OTHER_LDFLAGS="\$(inherited) -Wl,-U,_OBJC_CLASS_$_XCTElementQuery"
+            OTHER_LDFLAGS="-ObjC -Wl,-undefined,dynamic_lookup" 2>&1 | tee build.log | grep -E "(error:|warning:|ld:|clang:|SUCCEEDED|FAILED)" || (tail -n 40 build.log && exit 1)
 
       - name: 5. Đóng gói file .IPA
         run: |
