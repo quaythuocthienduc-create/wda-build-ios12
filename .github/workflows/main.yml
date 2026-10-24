@@ -1,4 +1,4 @@
-name: Build WDA v3.16.0 Pure iOS 12.5.6
+name: Build WDA v3.9.0 for iOS 12.5.6
 
 on:
   push:
@@ -13,11 +13,11 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - name: 1. Tải mã nguồn WDA v3.16.0
+      - name: 1. Tải mã nguồn WDA v3.9.0 gốc từ Appium
         uses: actions/checkout@v4
         with:
           repository: appium/WebDriverAgent
-          ref: v3.16.0
+          ref: v3.9.0
 
       - name: 2. Khởi tạo thư viện phụ thuộc (Carthage)
         run: |
@@ -26,7 +26,7 @@ jobs:
             ./Scripts/bootstrap.sh -d || true
           fi
 
-      - name: 3. Cấu hình Xcode Project về iOS 12.0
+      - name: 3. Cấu hình Xcode project tương thích iOS 12.0
         run: |
           sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*;/IPHONEOS_DEPLOYMENT_TARGET = 12.0;/g' WebDriverAgent.xcodeproj/project.pbxproj
           
@@ -59,53 +59,31 @@ jobs:
             WARNING_CFLAGS="-Wno-everything" \
             OTHER_LDFLAGS="-ObjC -Wl,-undefined,dynamic_lookup"
 
-      - name: 5. Dọn dẹp Framework iOS 13+ và ép chuẩn Binary về iOS 12.0
+      - name: 5. Dọn dẹp và tối ưu hóa cho iPhone 6 (iOS 12.5.6)
         run: |
           APP_PATH="./build_output/Build/Products/Release-iphoneos/WebDriverAgentRunner-Runner.app"
-          XCTEST_PATH="$APP_PATH/PlugIns/WebDriverAgentRunner.xctest"
-          WDA_LIB_PATH="$XCTEST_PATH/Frameworks/WebDriverAgentLib.framework"
-
-          # 1. Xóa toàn bộ các framework của Xcode 16 (iOS 13+/18+) tự chèn vào
-          # Để thiết bị tự gọi XCTest gốc của iOS 12.5.6 khi chạy tidevice
-          rm -rf "$APP_PATH/Frameworks/Testing.framework"
-          rm -rf "$APP_PATH/Frameworks/XCTestCore.framework"
-          rm -rf "$APP_PATH/Frameworks/XCTestSupport.framework"
-          rm -rf "$APP_PATH/Frameworks/XCUnit.framework"
-          rm -rf "$APP_PATH/Frameworks/XCUIAutomation.framework"
-          rm -rf "$APP_PATH/Frameworks/XCTAutomationSupport.framework"
-          rm -rf "$APP_PATH/Frameworks/XCTest.framework"
-          rm -rf "$APP_PATH/Frameworks/libXCTestSwiftSupport.dylib"
+          
+          # Xóa sạch thư mục Frameworks thừa của Xcode 16
+          rm -rf "$APP_PATH/Frameworks"
           rm -rf "$APP_PATH/PlugIns/WebDriverAgentRunner.xctest.dSYM"
+          rm -f "$APP_PATH/embedded.mobileprovision"
 
-          # 2. Ép cứng MinimumOSVersion = 12.0 trong tất cả các file Info.plist
-          plutil -replace MinimumOSVersion -string "12.0" "$APP_PATH/Info.plist"
-          plutil -replace MinimumOSVersion -string "12.0" "$XCTEST_PATH/Info.plist"
-          plutil -replace MinimumOSVersion -string "12.0" "$WDA_LIB_PATH/Info.plist"
-
-          # 3. Dùng vtool hạ cờ LC_BUILD_VERSION trong Mach-O Binary xuống iOS 12.0
+          # Ép thông số chuẩn iOS 12 trong Info.plist và Mach-O Header
+          find "$APP_PATH" -name "Info.plist" -exec plutil -replace MinimumOSVersion -string "12.0" {} + || true
           xcrun vtool -set-build-version ios 12.0 12.0 -replace -output "$APP_PATH/WebDriverAgentRunner-Runner" "$APP_PATH/WebDriverAgentRunner-Runner" || true
-          xcrun vtool -set-build-version ios 12.0 12.0 -replace -output "$XCTEST_PATH/WebDriverAgentRunner" "$XCTEST_PATH/WebDriverAgentRunner" || true
-          xcrun vtool -set-build-version ios 12.0 12.0 -replace -output "$WDA_LIB_PATH/WebDriverAgentLib" "$WDA_LIB_PATH/WebDriverAgentLib" || true
+          xcrun vtool -set-build-version ios 12.0 12.0 -replace -output "$APP_PATH/PlugIns/WebDriverAgentRunner.xctest/WebDriverAgentRunner" "$APP_PATH/PlugIns/WebDriverAgentRunner.xctest/WebDriverAgentRunner" || true
 
-          # 4. Xóa chữ ký rỗng để Sideloadly / zsign ký lại không bị lỗi
-          rm -rf "$APP_PATH/_CodeSignature"
-          rm -rf "$XCTEST_PATH/_CodeSignature"
-          rm -rf "$WDA_LIB_PATH/_CodeSignature"
+          # Xóa chữ ký cũ để chuẩn bị cài qua Sideloadly / tidevice
+          find "$APP_PATH" -name "_CodeSignature" -type d -exec rm -rf {} + || true
 
-          # 5. Đóng gói lại file IPA siêu nhẹ chuẩn iOS 12
+          # Đóng gói file .IPA
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
-          zip -r -9 WDA_v3.16.0_iOS12_Fixed.ipa Payload
+          zip -r -9 WDA_v3.9.0_iOS12_Stable.ipa Payload
 
-      - name: 6. Lưu vào Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: WDA-v3.16.0-iOS12-Fixed
-          path: WDA_v3.16.0_iOS12_Fixed.ipa
-
-      - name: 7. Xuất ra mục Releases
+      - name: 6. Xuất file ra mục Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.16.0-ios12-fixed
-          name: "WDA v3.16.0 Chuẩn iOS 12.5.6 (Đã gỡ Framework iOS 13+)"
-          files: WDA_v3.16.0_iOS12_Fixed.ipa
+          tag_name: v3.9.0-ios12-stable
+          name: "WDA v3.9.0 Ổn định tuyệt đối cho iOS 12.5.6"
+          files: WDA_v3.9.0_iOS12_Stable.ipa
