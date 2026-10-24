@@ -1,0 +1,79 @@
+name: Build WDA v3.16.0 for iOS 12.5.6
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+
+    steps:
+      - name: 1. Tải mã nguồn WDA v3.16.0
+        uses: actions/checkout@v4
+        with:
+          repository: appium/WebDriverAgent
+          ref: v3.16.0
+
+      - name: 2. Khởi tạo thư viện phụ thuộc
+        run: |
+          if [ -f "./Scripts/bootstrap.sh" ]; then
+            chmod +x ./Scripts/bootstrap.sh
+            ./Scripts/bootstrap.sh -d || true
+          fi
+
+      - name: 3. Vá lỗi XCTAutomationSupport và hạ chuẩn iOS 12.0
+        run: |
+          PBXPROJ="WebDriverAgent.xcodeproj/project.pbxproj"
+          
+          # Hạ Deployment Target xuống iOS 12.0
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9]*\.[0-9]*;/IPHONEOS_DEPLOYMENT_TARGET = 12.0;/g' "$PBXPROJ"
+          
+          # Gỡ bỏ liên kết trực tiếp XCTAutomationSupport gây lỗi linker trên Xcode mới
+          sed -i '' '/XCTAutomationSupport.framework/d' "$PBXPROJ"
+          sed -i '' 's/-framework XCTAutomationSupport//g' "$PBXPROJ"
+
+      - name: 4. Biên dịch WebDriverAgentRunner (arm64)
+        run: |
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -derivedDataPath ./build_output \
+            ARCHS="arm64" \
+            ONLY_ACTIVE_ARCH=NO \
+            IPHONEOS_DEPLOYMENT_TARGET="12.0" \
+            PRODUCT_BUNDLE_IDENTIFIER="com.facebook.WebDriverAgentRunner" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            WARNING_CFLAGS="-Wno-everything" \
+            OTHER_LDFLAGS="\$(inherited) -Wl,-U,_OBJC_CLASS_$_XCTElementQuery"
+
+      - name: 5. Đóng gói file .IPA
+        run: |
+          mkdir -p Payload
+          APP_PATH="./build_output/Build/Products/Release-iphoneos/WebDriverAgentRunner-Runner.app"
+          rm -rf "$APP_PATH/_CodeSignature"
+          cp -r "$APP_PATH" Payload/
+          zip -r -9 WDA_v3.16.0_iOS12_Unsigned.ipa Payload
+
+      - name: 6. Lưu vào Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WDA-v3.16.0-iOS12-IPA
+          path: WDA_v3.16.0_iOS12_Unsigned.ipa
+
+      - name: 7. Tự động xuất file IPA ra mục Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.16.0-ios12
+          name: "WebDriverAgent v3.16.0 cho iPhone 6 (iOS 12.5.6)"
+          files: WDA_v3.16.0_iOS12_Unsigned.ipa
